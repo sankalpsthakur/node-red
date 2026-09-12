@@ -1,0 +1,56 @@
+name: Audit Node-RED PR 5920
+
+on:
+  push:
+    branches:
+      - audit/oss-validation-20260912-node-red5920
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sankalpsthakur/node-red
+          ref: 6ce127cc22a7f05aec3353645276678601963a6f
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Record exact source and environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/node-red-5920-logs"
+          test "$(git rev-parse HEAD)" = "6ce127cc22a7f05aec3353645276678601963a6f"
+          {
+            git rev-parse HEAD
+            node --version
+            npm --version
+          } | tee "$RUNNER_TEMP/node-red-5920-logs/environment.txt"
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci 2>&1 | tee "$RUNNER_TEMP/node-red-5920-logs/install.log"
+      - name: Run upstream full test command
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test 2>&1 | tee "$RUNNER_TEMP/node-red-5920-logs/test.log"
+      - name: Save raw validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-red-5920-node-${{ matrix.node-version }}
+          path: ${{ runner.temp }}/node-red-5920-logs
+          if-no-files-found: warn
+          retention-days: 7
