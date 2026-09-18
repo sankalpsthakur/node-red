@@ -1,0 +1,87 @@
+name: Issue 5929 CSV regression validation
+on:
+  push:
+    branches: [validation/issue-5929-20260918]
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.repository == 'sankalpsthakur/node-red'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: sankalpsthakur/node-red
+          ref: d9644c41beb0d90d1cbf9375646e4259551182af
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Prepare regression and dependencies
+        working-directory: source
+        run: |
+          mkdir -p ../evidence
+          python3 ../validation/tools/oss-five/prepare_5929.py tests
+          npm ci
+          npm run build
+      - name: Require the original parser failure
+        working-directory: source
+        run: |
+          set +e
+          npm run mocha -- --grep 'CSV leading empty columns' > ../evidence/before.log 2>&1
+          status=$?
+          set -e
+          cat ../evidence/before.log
+          test "$status" -ne 0
+          grep -q "Cannot read properties of undefined (reading 'includes')" ../evidence/before.log
+      - name: Apply fix and test
+        working-directory: source
+        run: |
+          set -o pipefail
+          python3 ../validation/tools/oss-five/prepare_5929.py fix
+          git diff --check
+          npm run mocha -- --grep 'CSV leading empty columns' 2>&1 | tee ../evidence/after.log
+          npm run test 2>&1 | tee ../evidence/full-tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-5929-node-${{ matrix.node }}
+          path: evidence/
+          retention-days: 14
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: sankalpsthakur/node-red
+          ref: d9644c41beb0d90d1cbf9375646e4259551182af
+          path: source
+      - name: Publish the two validated files only
+        working-directory: source
+        run: |
+          python3 ../validation/tools/oss-five/prepare_5929.py tests
+          python3 ../validation/tools/oss-five/prepare_5929.py fix
+          git add packages/node_modules/@node-red/nodes/core/parsers/70-CSV.js test/nodes/core/parsers/70-CSV-leading-empty_spec.js
+          test "$(git diff --cached --name-only | wc -l)" -eq 2
+          git diff --cached --check
+          git -c user.name='Sankalp Thakur' -c user.email='31366524+sankalpsthakur@users.noreply.github.com' commit -m 'Fix legacy CSV parsing of leading empty columns'
+          git push origin HEAD:refs/heads/fix/issue-5929-csv-leading-empty
+          printf 'Validated fix commit: %s\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
