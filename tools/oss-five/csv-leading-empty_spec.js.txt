@@ -33,7 +33,7 @@ describe("CSV leading empty columns (Legacy Mode)", function() {
     function checkCSV(config, payload, expected, done) {
         const flow = [Object.assign({
             id: "n1", type: "csv", spec: "legacy", temp: "a,b,c",
-            multi: "mult", include_empty_strings: true, wires: [["n2"]]
+            multi: "mult", include_empty_strings: false, wires: [["n2"]]
         }, config), {id: "n2", type: "helper"}];
         helper.load(csvNode, flow, function() {
             const n1 = helper.getNode("n1");
@@ -83,9 +83,14 @@ describe("CSV leading empty columns (Legacy Mode)", function() {
             [{a: null, b: null, c: 2}], done);
     });
 
+    it("does not turn a missing first field into an empty string", function(done) {
+        checkCSV({include_null_values: false, include_empty_strings: true},
+            ",1,2", [{b: 1, c: 2}], done);
+    });
+
     it("keeps a quoted empty first field as an empty string", function(done) {
-        checkCSV({include_null_values: true}, '"",1,2\n',
-            [{a: "", b: 1, c: 2}], done);
+        checkCSV({include_null_values: true, include_empty_strings: true},
+            '"",1,2', [{a: "", b: 1, c: 2}], done);
     });
 
     it("omits a quoted empty field when empty strings are disabled", function(done) {
