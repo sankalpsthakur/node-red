@@ -224,4 +224,74 @@ describe("storage/localfilesystem/projects/Project", function() {
             }
         });
     });
+
+    ["diff3","zdiff3"].forEach(function(style) {
+        describe("resolveMerge with "+style+" conflict markers", function() {
+            var project;
+
+            beforeEach(async function() {
+                if (!gitAvailable) {
+                    this.skip();
+                    return;
+                }
+                this.timeout(20000);
+                await fs.remove(userDir);
+                await fs.ensureDir(projectDir);
+
+                git(["init"]);
+                git(["config","user.email","nodered@example.com"]);
+                git(["config","user.name","Node-RED Test"]);
+                git(["config","commit.gpgsign","false"]);
+                git(["config","merge.conflictStyle",style]);
+                writeFile("package.json","{\n  \"name\": \"demo\",\n  \"version\": \"0.9.0\"\n}\n");
+                git(["add","-A"]);
+                git(["commit","-m","initial"]);
+                var mainBranch = git(["rev-parse","--abbrev-ref","HEAD"]).trim();
+
+                git(["checkout","-b","other"]);
+                writeFile("package.json","{\n  \"name\": \"demo\",\n  \"version\": \"1.1.0\"\n}\n");
+                git(["commit","-a","-m","theirs"]);
+
+                git(["checkout",mainBranch]);
+                writeFile("package.json","{\n  \"name\": \"demo\",\n  \"version\": \"1.0.0\"\n}\n");
+                git(["commit","-a","-m","ours"]);
+                try {
+                    git(["merge","other"]);
+                } catch(err) {
+                    // The merge is expected to fail with conflicts
+                }
+                unmergedFiles().should.eql(["package.json"]);
+                readFile("package.json").should.match(/^\|{7} /m);
+
+                Projects.init(mockSettings, mockRuntime);
+                project = await Projects.load(projectDir);
+            });
+
+            afterEach(async function() {
+                await fs.remove(userDir);
+            });
+
+            it("keeps local changes without leaking ||||||| when selecting A", async function() {
+                await project.resolveMerge("package.json",{
+                    3: { selection: "A", separator: 7, changeEnd: 9 }
+                });
+
+                var resolved = readFile("package.json");
+                resolved.should.not.match(/\|\|\|\|\|\|\|/);
+                JSON.parse(resolved).should.eql({ name: "demo", version: "1.0.0" });
+                unmergedFiles().should.eql([]);
+            });
+
+            it("keeps remote changes without leaking ||||||| when selecting B", async function() {
+                await project.resolveMerge("package.json",{
+                    3: { selection: "B", separator: 7, changeEnd: 9 }
+                });
+
+                var resolved = readFile("package.json");
+                resolved.should.not.match(/\|\|\|\|\|\|\|/);
+                JSON.parse(resolved).should.eql({ name: "demo", version: "1.1.0" });
+                unmergedFiles().should.eql([]);
+            });
+        });
+    });
 });
